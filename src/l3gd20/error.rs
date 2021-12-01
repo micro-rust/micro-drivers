@@ -1,4 +1,4 @@
-//! Errors that can occur with the LSM3030DLHC device.
+//! Errors that can occur with the L3GD20 device.
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

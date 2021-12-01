@@ -47,6 +47,7 @@ impl Config {
     /// Sets the enabled axis for the accelerometer.
     #[inline(always)]
     pub const fn axis(mut self, axis: u8) -> Self {
+        self.ctrl1 &= !0x7;
         self.ctrl1 |= axis & 0x7;
         self
     }

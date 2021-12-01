@@ -176,9 +176,9 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Magnetometer for Ls
         let rawz: i16 = unsafe { core::mem::transmute( ((data[2] as u16) << 8) | (data[3] as u16) ) };
 
         // Check for a range overflow.
-        if (rawx >= 2040) || (rawx <= -2040) { return Err( Error::RangeOverflowX ) }
-        if (rawy >= 2040) || (rawy <= -2040) { return Err( Error::RangeOverflowY ) }
-        //if (rawz >= 2040) || (rawz <= -2040) { return Err( Error::RangeOverflowZ ) }
+        if (rawx >= 2048) || (rawx < -2048) { return Err( Error::RangeOverflowX ) }
+        if (rawy >= 2048) || (rawy < -2048) { return Err( Error::RangeOverflowY ) }
+        //if (rawz >= 2048) || (rawz < -2048) { return Err( Error::RangeOverflowZ ) }
 
         // Get the resolution multiplier.
         let (xy, z) = self.mag.params();
@@ -189,7 +189,6 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Magnetometer for Ls
 
         Ok([magx, magy, magz])
     }
-
 }
 
 

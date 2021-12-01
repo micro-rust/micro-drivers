@@ -36,9 +36,14 @@ pub struct L3gd20<I> {
 impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> L3gd20<I> {
 
     /// Creates a new driver and configures the device.
-    pub fn create(interface: I, addr: u8, cfg: Config) -> Result<Self, <I as Write>::Error> {
+    /// As the address of this sensor is hardware configurable, the lowbit flag
+    /// indicates that the 0x69 address is used, rather than the 0x68.
+    pub fn create(interface: I, cfg: Config, lowbit: bool) -> Result<Self, <I as Write>::Error> {
         // Get the parameters of the accelerometer and magnetometer.
         let gyro = cfg.params();
+
+        // Build address.
+        let addr = if lowbit { 0x69 } else { 0x68 };
 
         // Create the device.
         let mut device = L3gd20 { interface, addr, gyro };

@@ -41,39 +41,56 @@ pub enum DataRate {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Scale {
-    /// 1.3 Gauss scale.
+pub enum Range {
+    /// 1.3 Gauss Range.
     Gauss1_3 = 0b001,
 
-    /// 1.9 Gauss scale.
+    /// 1.9 Gauss Range.
     Gauss1_9 = 0b010,
 
-    /// 2.5 Gauss scale.
+    /// 2.5 Gauss Range.
     Gauss2_5 = 0b011,
 
-    /// 4.0 Gauss scale.
+    /// 4.0 Gauss Range.
     Gauss4_0 = 0b100,
 
-    /// 4.7 Gauss scale.
+    /// 4.7 Gauss Range.
     Gauss4_7 = 0b101,
 
-    /// 5.6 Gauss scale.
+    /// 5.6 Gauss Range.
     Gauss5_6 = 0b110,
 
-    /// 8.1 Gauss scale.
+    /// 8.1 Gauss Range.
     Gauss8_1 = 0b111,
 }
 
-impl core::convert::From<u8> for Scale {
-    fn from(s: u8) -> Scale {
+pub type Scale = Range;
+
+impl Range {
+    /// Returns the parameters to calculate the real magnetic field value.
+    pub(super) fn params(&self) -> (i16, i16) {
+        match *self {
+            Range::Gauss1_3 => (1100, 980),
+            Range::Gauss1_9 => ( 855, 760),
+            Range::Gauss2_5 => ( 670, 600),
+            Range::Gauss4_0 => ( 450, 400),
+            Range::Gauss4_7 => ( 400, 355),
+            Range::Gauss5_6 => ( 330, 295),
+            Range::Gauss8_1 => ( 230, 205),
+        }
+    }
+}
+
+impl core::convert::From<u8> for Range {
+    fn from(s: u8) -> Range {
         match s {
-            0b001 => Scale::Gauss1_3,
-            0b010 => Scale::Gauss1_9,
-            0b011 => Scale::Gauss2_5,
-            0b100 => Scale::Gauss4_0,
-            0b101 => Scale::Gauss4_7,
-            0b110 => Scale::Gauss5_6,
-            0b111 => Scale::Gauss8_1,
+            0b001 => Range::Gauss1_3,
+            0b010 => Range::Gauss1_9,
+            0b011 => Range::Gauss2_5,
+            0b100 => Range::Gauss4_0,
+            0b101 => Range::Gauss4_7,
+            0b110 => Range::Gauss5_6,
+            0b111 => Range::Gauss8_1,
 
             _ => panic!(),
         }
@@ -112,12 +129,12 @@ pub(crate) enum Register {
     /// Status register.
     Status = 0x09,
 
-    /// Interrupt A register.
-    IntA = 0x0A,
-    /// Interrupt B register.
-    IntB = 0x0B,
-    /// Interrupt C register.
-    IntC = 0x0C,
+    /// ID A register.
+    IdA = 0x0A,
+    /// ID B register.
+    IdB = 0x0B,
+    /// ID C register.
+    IdC = 0x0C,
 
     /// Temperature MSB output.
     TempOutH = 0x31,

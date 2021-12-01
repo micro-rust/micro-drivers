@@ -62,6 +62,15 @@ impl Config {
     #[inline(always)]
     pub const fn normal(mut self) -> Self {
         self.ctrl1 &= !(1 << 3);
+        self.ctrl4 &= !(1 << 3);
+        self
+    }
+
+    /// Sets the LSM303DLHC in high resolution mode.
+    #[inline(always)]
+    pub const fn highres(mut self) -> Self {
+        self.ctrl1 &= !(1 << 3);
+        self.ctrl4 |= 1 << 3;
         self
     }
 
@@ -109,11 +118,31 @@ impl Config {
     }
 
 
-    /// Returns the scales of the sensors.
-    pub fn get_scales(&self) -> (accel::Scale, mag::Scale) {
+    /// Returns the parameters.
+    pub fn params(&self) -> ((accel::Mode, accel::Range), mag::Range) {
+        // Get the accelerometer mode.
+        let mode = match (self.ctrl1 >> 3) & 1 {
+            0 => match (self.ctrl4 >> 3) & 1 {
+                0 => accel::Mode::Normal,
+                _ => accel::Mode::HighResolution,
+            },
+            _ => accel::Mode::LowPower,
+        };
+
+        // Get the accelerometer range.
+        let arange = accel::Range::from( (self.ctrl4 >> 4) & 0x3 );
+
+        // Get the magnetometer range.
+        let mrange = mag::Range::from( (self.crb >> 5) & 0x7 );
+
+
         (
-            accel::Scale::from( (self.ctrl4 >> 4) & 0x3 ),
-            mag::Scale::from( (self.crb >> 5) & 0x7 ),
+            (
+                mode,
+                arange,
+            ),
+
+            mrange,
         )
     }
 }

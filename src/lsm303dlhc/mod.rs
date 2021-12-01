@@ -5,9 +5,11 @@ pub mod accel;
 pub mod mag;
 
 mod config;
+mod error;
 
 
 pub use self::config::Config;
+pub use self::error::Error;
 
 use crate::{ Accelerometer, Magnetometer, Thermometer };
 
@@ -25,15 +27,22 @@ pub struct Lsm303dlhc<I> {
     /// I2C interface.
     interface: I,
 
-    /// Scales of the accelerometer and magnetometer.
-    scale: (accel::Scale, mag::Scale),
+    /// Accelerometer mode and range.
+    accel: (accel::Mode, accel::Range),
+
+    /// Magnetometer range.
+    mag: mag::Range,
 }
 
 impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Lsm303dlhc<I> {
 
     /// Creates a new driver and configures the device.
     pub fn create(interface: I, cfg: Config) -> Result<Self, <I as Write>::Error> {
-        let mut device = Lsm303dlhc { interface, scale: cfg.get_scales() };
+        // Get the parameters of the accelerometer and magnetometer.
+        let (accel, mag) = cfg.params();
+
+        // Create the device.
+        let mut device = Lsm303dlhc { interface, accel, mag };
 
         // Configure accelrometer module.
         device.wr(accel::ACCEL, &[accel::Register::Ctrl1 as u8, cfg.ctrl1])?;
@@ -43,8 +52,14 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Lsm303dlhc<I> {
         device.wr(accel::ACCEL, &[accel::Register::Ctrl5 as u8, cfg.ctrl5])?;
         device.wr(accel::ACCEL, &[accel::Register::Ctrl6 as u8, cfg.ctrl6])?;
 
-        device.wr(mag::MAG, &[mag::Register::Cra as u8, cfg.cra])?;
+
+        // Reset the magnetometer gain.
+        device.wr(mag::MAG, &[mag::Register::Crb as u8, 0x00])?;
+        // Configure magnetometer gain.
         device.wr(mag::MAG, &[mag::Register::Crb as u8, cfg.crb])?;
+        // Set output data rate and temperature.
+        device.wr(mag::MAG, &[mag::Register::Cra as u8, cfg.cra])?;
+        // Enable continous mode, single conversion or sleep mode.
         device.wr(mag::MAG, &[mag::Register::Mr  as u8, cfg.mr ])?;
 
         Ok(device)
@@ -65,10 +80,10 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Lsm303dlhc<I> {
 
 
 impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Accelerometer for Lsm303dlhc<I> {
-    type Error = <I as WriteRead>::Error;
+    type Error = Error<<I as WriteRead>::Error>;
     type Output = i16;
 
-    fn accelraw(&mut self) -> Result<[i16; 3], <I as WriteRead>::Error> {
+    fn accelraw(&mut self) -> Result<[i16; 3], Error<<I as WriteRead>::Error>> {
         // Create the input buffer.
         // This is safe, as this buffer will be written to before we read.
         let mut data: [u8; 6] = unsafe { MaybeUninit::uninit().assume_init() };
@@ -77,15 +92,15 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Accelerometer for L
         self.wrrd(accel::ACCEL, &[accel::Register::OutXL as u8 | (1 << 7)], &mut data).unwrap();
 
         // Get the raw i16 data.
-        let rawx = (data[0] as i16) | ((data[1] as i16) << 8);
-        let rawy = (data[2] as i16) | ((data[3] as i16) << 8);
-        let rawz = (data[4] as i16) | ((data[5] as i16) << 8);
+        let rawx: i16 = unsafe { core::mem::transmute( (data[0] as u16) | ((data[1] as u16) << 8) ) };
+        let rawy: i16 = unsafe { core::mem::transmute( (data[2] as u16) | ((data[3] as u16) << 8) ) };
+        let rawz: i16 = unsafe { core::mem::transmute( (data[4] as u16) | ((data[5] as u16) << 8) ) };
 
         Ok([rawx, rawy, rawz])
 
     }
 
-    fn accel<F>(&mut self) -> Result<[F; 3], <I as WriteRead>::Error>
+    fn accel<F>(&mut self) -> Result<[F; 3], Error<<I as WriteRead>::Error>>
         where F: Clone + Copy +
             From<f32> + From<Self::Output> +
             Add<F, Output=F> + Sub<F, Output=F> +
@@ -99,49 +114,47 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Accelerometer for L
         self.wrrd(accel::ACCEL, &[accel::Register::OutXL as u8 | (1 << 7)], &mut data).unwrap();
 
         // Get the raw i16 data.
-        let rawx = ((data[0] as i16) | ((data[1] as i16) << 8)) >> 4;
-        let rawy = ((data[2] as i16) | ((data[3] as i16) << 8)) >> 4;
-        let rawz = ((data[4] as i16) | ((data[5] as i16) << 8)) >> 4;
+        let rawx: i16 = unsafe { core::mem::transmute( (data[0] as u16) | ((data[1] as u16) << 8) ) };
+        let rawy: i16 = unsafe { core::mem::transmute( (data[2] as u16) | ((data[3] as u16) << 8) ) };
+        let rawz: i16 = unsafe { core::mem::transmute( (data[4] as u16) | ((data[5] as u16) << 8) ) };
 
-        // Get the resolution multiplier.
-        let mul: F = match self.scale.0 {
-            accel::Scale::G2  => F::from(0.001),
-            accel::Scale::G4  => F::from(0.002),
-            accel::Scale::G8  => F::from(0.004),
-            accel::Scale::G16 => F::from(0.012),
-        };
+        // Get the shift and LSB data.
+        let (shift, lsb) = self.accel.0.params(self.accel.1);
 
-        let accx = (F::from(rawx) * mul) * F::from(9.80665);
-        let accy = (F::from(rawy) * mul) * F::from(9.80665);
-        let accz = (F::from(rawz) * mul) * F::from(9.80665);
+        // Calculate the acceleration.
+        let accx = F::from(rawx >> shift) * F::from(lsb) * F::from( 9.80665 );
+        let accy = F::from(rawy >> shift) * F::from(lsb) * F::from( 9.80665 );
+        let accz = F::from(rawz >> shift) * F::from(lsb) * F::from( 9.80665 );
 
         Ok([accx, accy, accz])
-
     }
 }
 
 
 impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Magnetometer for Lsm303dlhc<I> {
-    type Error = <I as WriteRead>::Error;
+    type Error = Error<<I as WriteRead>::Error>;
     type Output = i16;
 
-    fn magraw(&mut self) -> Result<[i16; 3], <I as WriteRead>::Error> {
+    fn magraw(&mut self) -> Result<[i16; 3], Error<<I as WriteRead>::Error>> {
         // Create the input buffer.
         // This is safe, as this buffer will be written to before we read.
         let mut data: [u8; 6] = unsafe { MaybeUninit::uninit().assume_init() };
 
         // Read in the output data.
-        self.wrrd(mag::MAG, &[mag::Register::OutXH as u8 | (1 << 7)], &mut data)?;
+        match self.wrrd(mag::MAG, &[mag::Register::OutXH as u8 | (1 << 7)], &mut data) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
+        };
 
         // Get the raw i16 data.
-        let rawx = ((data[0] as i16) << 8) | (data[1] as i16);
-        let rawy = ((data[4] as i16) << 8) | (data[5] as i16);
-        let rawz = ((data[2] as i16) << 8) | (data[3] as i16);
+        let rawx: i16 = unsafe { core::mem::transmute( ((data[0] as u16) << 8) | (data[1] as u16) ) };
+        let rawy: i16 = unsafe { core::mem::transmute( ((data[4] as u16) << 8) | (data[5] as u16) ) };
+        let rawz: i16 = unsafe { core::mem::transmute( ((data[2] as u16) << 8) | (data[3] as u16) ) };
 
         Ok([rawx, rawy, rawz])
     }
 
-    fn mag<F>(&mut self) -> Result<[F; 3], <I as WriteRead>::Error>
+    fn mag<F>(&mut self) -> Result<[F; 3], Error<<I as WriteRead>::Error>>
         where F: Clone + Copy +
             From<f32> + From<Self::Output> +
             Add<F, Output=F> + Sub<F, Output=F> +
@@ -152,27 +165,27 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Magnetometer for Ls
         let mut data: [u8; 6] = unsafe { MaybeUninit::uninit().assume_init() };
 
         // Read in the output data.
-        self.wrrd(mag::MAG, &[mag::Register::OutXH as u8 | (1 << 7)], &mut data)?;
-
-        // Get the raw i16 data.
-        let rawx = ((data[0] as i16) << 8) | (data[1] as i16);
-        let rawy = ((data[4] as i16) << 8) | (data[5] as i16);
-        let rawz = ((data[2] as i16) << 8) | (data[3] as i16);
-
-        // Get the resolution multiplier.
-        let (xy, z): (F, F) = match self.scale.1 {
-            mag::Scale::Gauss1_3  => (F::from(1.0 / 1100.0), F::from(1.0 / 980.0) ),
-            mag::Scale::Gauss1_9  => (F::from(1.0 /  855.0), F::from(1.0 / 760.0) ),
-            mag::Scale::Gauss2_5  => (F::from(1.0 /  670.0), F::from(1.0 / 600.0) ),
-            mag::Scale::Gauss4_0  => (F::from(1.0 /  450.0), F::from(1.0 / 400.0) ),
-            mag::Scale::Gauss4_7  => (F::from(1.0 /  400.0), F::from(1.0 / 355.0) ),
-            mag::Scale::Gauss5_6  => (F::from(1.0 /  330.0), F::from(1.0 / 295.0) ),
-            mag::Scale::Gauss8_1  => (F::from(1.0 /  230.0), F::from(1.0 / 205.0) ),
+        match self.wrrd(mag::MAG, &[mag::Register::OutXH as u8 | (1 << 7)], &mut data) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
         };
 
-        let magx = (F::from(rawx) * xy) * F::from(100);
-        let magy = (F::from(rawy) * xy) * F::from(100);
-        let magz = (F::from(rawz) *  z) * F::from(100);
+        // Get the raw i16 data.
+        let rawx: i16 = unsafe { core::mem::transmute( ((data[0] as u16) << 8) | (data[1] as u16) ) };
+        let rawy: i16 = unsafe { core::mem::transmute( ((data[4] as u16) << 8) | (data[5] as u16) ) };
+        let rawz: i16 = unsafe { core::mem::transmute( ((data[2] as u16) << 8) | (data[3] as u16) ) };
+
+        // Check for a range overflow.
+        if (rawx >= 2040) || (rawx <= -2040) { return Err( Error::RangeOverflowX ) }
+        if (rawy >= 2040) || (rawy <= -2040) { return Err( Error::RangeOverflowY ) }
+        //if (rawz >= 2040) || (rawz <= -2040) { return Err( Error::RangeOverflowZ ) }
+
+        // Get the resolution multiplier.
+        let (xy, z) = self.mag.params();
+
+        let magx = (F::from(rawx) / F::from(xy)) * F::from(100);
+        let magy = (F::from(rawy) / F::from(xy)) * F::from(100);
+        let magz = (F::from(rawz) / F::from( z)) * F::from(100);
 
         Ok([magx, magy, magz])
     }
@@ -181,17 +194,24 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Magnetometer for Ls
 
 
 impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Thermometer for Lsm303dlhc<I> {
-    type Error = <I as WriteRead>::Error;
+    type Error = Error<<I as WriteRead>::Error>;
     type Output = i16;
 
-    fn tempraw(&mut self) -> Result<i16, <I as WriteRead>::Error> {
+    fn tempraw(&mut self) -> Result<i16, Error<<I as WriteRead>::Error>> {
         // Create the input buffer.
         // This is safe, as this buffer will be written to before we read.
         let mut data: [u8; 2] = unsafe { MaybeUninit::uninit().assume_init() };
 
         // Read in the output data.
-        self.wrrd(mag::MAG, &[mag::Register::TempOutH as u8], &mut data[0..1])?;
-        self.wrrd(mag::MAG, &[mag::Register::TempOutL as u8], &mut data[1.. ])?;
+        match self.wrrd(mag::MAG, &[mag::Register::TempOutH as u8], &mut data[0..1]) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
+        };
+
+        match self.wrrd(mag::MAG, &[mag::Register::TempOutL as u8], &mut data[1..]) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
+        };
 
         // Get the raw i16 data.
         let raw = (((data[0] as i16) << 8) | (data[1] as i16)) >> 4;
@@ -199,7 +219,7 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Thermometer for Lsm
         Ok(raw)
     }
 
-    fn temp<F>(&mut self) -> Result<F, <I as WriteRead>::Error>
+    fn temp<F>(&mut self) -> Result<F, Error<<I as WriteRead>::Error>>
         where F: Clone + Copy +
             From<f32> + From<Self::Output> +
             Add<F, Output=F> + Sub<F, Output=F> +
@@ -210,8 +230,15 @@ impl<I: Write<SevenBitAddress> + WriteRead<SevenBitAddress>> Thermometer for Lsm
         let mut data: [u8; 2] = unsafe { MaybeUninit::uninit().assume_init() };
 
         // Read in the output data.
-        self.wrrd(mag::MAG, &[mag::Register::TempOutH as u8], &mut data[0..1])?;
-        self.wrrd(mag::MAG, &[mag::Register::TempOutL as u8], &mut data[1.. ])?;
+        match self.wrrd(mag::MAG, &[mag::Register::TempOutH as u8], &mut data[0..1]) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
+        };
+
+        match self.wrrd(mag::MAG, &[mag::Register::TempOutL as u8], &mut data[1..]) {
+            Err(e) => return Err( Error::BusError(e) ),
+            _ => (),
+        };
 
         // Get the raw i16 data.
         let raw = (((data[0] as i16) << 8) | (data[1] as i16)) >> 4;

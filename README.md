@@ -1,10 +1,11 @@
-# micro-drivers
-Drivers for common external devices
+# μdrivers
+`μdrivers` or `micro-drivers` is a crate that collects drivers for various
+external peripherals adn exposes them through common trait interfaces.
 
 
 ## Usage
 To use this crate simply add the next snippet to your `Cargo.toml`.
 ```
 [dependencies]
-micro-drivers = "0.1"
+udrivers = "0.1"
 ```

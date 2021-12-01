@@ -80,20 +80,22 @@ pub enum DataRate {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Scale {
+pub enum Range {
     G2  = 0b00,
     G4  = 0b01,
     G8  = 0b10,
     G16 = 0b11,
 }
 
-impl core::convert::From<u8> for Scale {
-    fn from(s: u8) -> Scale {
+pub type Scale = Range;
+
+impl core::convert::From<u8> for Range {
+    fn from(s: u8) -> Range {
         match s {
-            0b00 =>  Scale::G2,
-            0b01 =>  Scale::G4,
-            0b10 =>  Scale::G8,
-            0b11 => Scale::G16,
+            0b00 =>  Range::G2,
+            0b01 =>  Range::G4,
+            0b10 =>  Range::G8,
+            0b11 => Range::G16,
 
             _ => panic!(),
         }
@@ -184,3 +186,45 @@ pub(crate) enum Register {
     /// Detection time Window.
     TimeWindow = 0x3D,
 }
+
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    HighResolution,
+    Normal,
+    LowPower,
+}
+
+impl Mode {
+    /// Returns the parameters to calculate the real acceleration.
+    #[inline]
+    pub(super) fn params(&self, range: Range) -> (usize, f32) {
+        match *self {
+            // LSB values in high resolution mode.
+            Mode::HighResolution => match range {
+                Range::G2  => (4, 0.00098),
+                Range::G4  => (4, 0.00195),
+                Range::G8  => (4, 0.00390),
+                Range::G16 => (4, 0.01172),
+            },
+
+            // LSB values in normal mode.
+            Mode::Normal => match range {
+                Range::G2  => (6, 0.00390),
+                Range::G4  => (6, 0.00782),
+                Range::G8  => (6, 0.01563),
+                Range::G16 => (6, 0.04690),
+            },
+
+            // LSB values in low power mode.
+            Mode::LowPower => match range {
+                Range::G2  => (8, 0.01563),
+                Range::G4  => (8, 0.03126),
+                Range::G8  => (8, 0.06252),
+                Range::G16 => (8, 0.18758),
+            },
+        }
+    }
+}
+

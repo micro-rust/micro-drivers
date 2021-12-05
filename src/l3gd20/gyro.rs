@@ -83,6 +83,47 @@ pub enum DataRate {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+pub enum FIFOMode {
+    /// FIFO is bypassed.
+    Bypass = 0b000,
+
+    /// FIFO mode.
+    Fifo = 0b001,
+
+    /// Stream mode.
+    Stream = 0b010,
+
+    /// Stream to FIFO mode.
+    StreamToFifo = 0b011,
+
+    /// Bypass to Stream mode.
+    BypassToStream = 0b100,
+}
+
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OutputSelect {
+    /// Raw output. ADC -> Low Pass Filter 1 -> Output.
+    Raw = 0b00,
+
+    /// High Pass filter.
+    /// ADC -> Low Pass Filter 1 -> High Pass Filter -> Output.
+    /// The High Pass Filter can be bypassed and configured.
+    HighPassFilter = 0b01,
+
+    /// High Pass filter.
+    /// ADC -> Low Pass Filter 1 -> High Pass Filter -> LowPass Filter 2 -> Output.
+    /// The High Pass Filter can be bypassed and configured.
+    /// This is the default option.
+    LowPassFilter = 0b10,
+}
+
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Range {
     Dps250   = 0b00,
     Dps500   = 0b01,

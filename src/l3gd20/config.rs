@@ -78,7 +78,7 @@ impl const Default for Config {
             ctrl2: 0b00000000,
             ctrl3: 0b00000000,
             ctrl4: 0b10000000,
-            ctrl5: 0b01000000,
+            ctrl5: 0b01000011,
         }
     }
 }
